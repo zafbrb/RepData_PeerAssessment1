@@ -1,25 +1,412 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+author: "zafbrb"
+date: "Thursday, August 06, 2015"
+output: html_document
+keep_md: true
 ---
+This assignment is part of the Coursera Reproducible Research Module of Data Science. 
 
+This assignment makes use of data from a personal activity monitoring device. This device collects data at 5 minute intervals through out the day. The data consists of two months of data from an anonymous individual collected during the months of October and November, 2012 and include the number of steps taken in 5 minute intervals each day.
+
+The data is contained in the course web site  
+
+  - Dataset: [Activity monitoring data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip) [52K] as a ZIP file  
 
 ## Loading and preprocessing the data
 
+Lets make sure we load all the libray we need first
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages("dplyr", "KernSmooth", "knitr", "lattice", "plotrix")
+library(dplyr)
+library(KernSmooth)
+library(knitr)
+library(lattice)
+library(plotrix)
+library(grid)
+library(gridExtra)
+library(ggplot2)
+#library(printr)
+
+
+```
+
+Assumes the **activity.csv** file is in the working directory
+
+```{r}
+rawData <- read.csv("activity.csv", stringsAsFactor=FALSE)
+str(rawData)
+summary(rawData)
+```
+Notice there are several thousand NA's in the {steps} column
 
 
 ## What is mean total number of steps taken per day?
+
+For this question we will disregard the NA's by removing them from the data frame. 
+
+```{r}
+ActivityNoNA <- rawData[complete.cases(rawData),]
+```
+
+Now lets just create a new column on the data frame which is the date time column. 
+
+**Watchout:** DPLYR package - you cannot use strptime() as it create POSIXlt data types which the by_group does not handle. So we use as.POSIXct() to convert  
+
+```{r}
+# Create character representation of the intervals in form HH:MM
+hrs <- paste(sprintf("%02d", ActivityNoNA$interval%/%100), 
+             sprintf("%02d", ActivityNoNA$interval%%100), sep=":") 
+
+# Create a new column for the data frame 
+date_time <- as.POSIXct(paste(ActivityNoNA$date, hrs), "%Y-%m-%d %H:%M", tz="GMT")
+ActivityNoNA$date_time <- date_time
+```
+
+Looking at the summary stats
+```{r}
+summary(ActivityNoNA)
+```
+
+Then we will group the data frame by day and calculate the mean. For this we will use the DPLYR package
+
+```{r, echo=TRUE}
+by_days <- group_by(ActivityNoNA, date)
+mean_by_day <- summarise(by_days, mean_steps = mean(steps))
+total_by_day <- summarise(by_days, sum_steps = sum(steps))
+stats_by_day <- summarise(by_days, 
+                          mean_steps = mean(steps), 
+                          total_steps = sum(steps),
+                          median_steps = median(steps))
+print.data.frame(stats_by_day)
+```
+
+### Calculate the total number of steps taken per day
+
+Showing the Total number of steps by day
+```{r}
+print.data.frame(total_by_day)
+```
+
+Looking at the data we can see that there are a lot of slots with no steps. Below we show a histogram of steps by day.
+
+```{r}
+histogram(~steps | date, data=by_days, par.strip.text=list(cex=0.7))
+
+```
+
+If we look at an xyplot we can see that there are definite times where activity takes place
+
+```{r}
+xyplot(steps ~ interval | date, data=by_days, par.strip.text=list(cex=0.7))
+
+```
+
+
+### Histogram of total number of steps taken each day
+
+A histogram plots the frequency of a variable. In our case we want to plot a histogram of the total number of steps per day. The trick is to decide on the optimal bin size to choose as our variable is a continous range.
+
+We can select a histogram bin size by using the R function [**dpih()**](https://stat.ethz.ch/R-manual/R-devel/library/KernSmooth/html/dpih.html)
+
+We use the output of **dpih()** to determine the optimal bin size. This method for selecting the bin width of a histogram is described in Wand(1995) 
+
+```{r}
+# Lets strip out the total steps
+tbd <- total_by_day[[2]]
+h <- dpih(tbd)
+# Calculate the bins 
+bins <- seq(min(tbd)-h, max(tbd)+h, by=h)
+# Plot the histogram
+hist(tbd, breaks=bins, main="Histogram of Total Number of Steps per Day",
+     xlab="Total Number of Steps per Day",
+     col="cyan")
+```
+
+Compare this to the default histogram plot using **histogram**
+
+```{r}
+hst1 <- histogram(~ tbd, data=total_by_day,
+                main = "Histogram of Total Number of Steps per Day - No NA's",
+                xlab = "Total Number of Steps per Day")
+hst1 
+```
+
+
+### Calculate the mean and median of the total number of steps taken each day
+
+Again using the summarise function lets get **mean** and **median**
+
+```{r}
+overall <- summarise(total_by_day, 
+                mean_total_steps = mean(sum_steps),
+                median_total_steps = median(sum_steps))
+print.data.frame(overall)
+```
 
 
 
 ## What is the average daily activity pattern?
 
+We group the steps by the interval across all the days and then get an average. 
+We used a polar plot to show the activity on a clock face. This uses the package **plotrix** and the useful function **clock24.plot()**
+
+```{r}
+by_int <- group_by(ActivityNoNA, interval)
+avg_steps_int <- summarise(by_int, mean_steps = mean(steps))
+
+# Prepare the data for polar ploting
+pos3 <- (avg_steps_int$interval)
+# This next line just converts an interval expressed as 1230 to the decimal equivalent of 12h30
+pos3 <- (pos3 %/% 100 ) + ((pos3 %% 100)/60)
+len3 <- (avg_steps_int$mean_steps)
+#This shows a 24 hour clock with the average steps per time period
+clock24.plot(len3, pos3, lwd=3, show.grid.labels=FALSE, line.col="blue",
+             main="Polar plot of average steps taken across all intervals")
+```
+
+You can see that there are activity peaks between 08h00 and 09h00 in the morning, again at lunch time (12h00), and then again at 16h00 and 18h00. This is consistent with times normally associated with gym visits, or when people are active.  
+
+
+### Time series plot
+Lets plot the average number of steps taken vs the interval. We will use the decimal equivalent of interval calculated for the Clock plot as its easier to visualize the hours on the X-Axis
+
+```{r}
+plot(pos3, avg_steps_int$mean_steps,  
+     type="l",
+     xlab ="Interval in 5 minute increments shown as hours", 
+     main = "Time Series Plot of Steps Taken", 
+     ylab = "Average steps taken", 
+     mar=c(5.1, 4.1, 4.1, 2.1))
+
+```
+
+### Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of days?
+
+Ok we need to find out those intervals which have had a non-zero activity, group by the interval and then sum the logical vector 
+
+```{r}
+# Created a column which is a logical vector
+ActivityNoNA$act_pos <- ActivityNoNA$steps > 0
+
+# Now group by interval
+by_interval <- group_by(ActivityNoNA, interval)
+
+# Lets summarise by the activity indicator
+days_active <- summarise(by_interval, no_days_active=sum(act_pos))
+
+# Now get the interval with the max no-days_active 
+max_interval <- days_active[which.max(days_active$no_days_active),]
+```
+
+the number is in:
+```{r}
+max_interval
+```
+
+Lets plot it. We will use a library called **gridExtra** that allows table plotting along side graphical plots. 
+
+```{r}
+tbl <- tableGrob(max_interval, rows=NULL)
+plt <- ggplot(days_active, aes(interval, no_days_active)) + 
+        geom_area(color="blue", fill="blue") + 
+        geom_vline(xintercept=max_interval$interval) + 
+        ggtitle("Activity Days per Interval") + 
+        xlab("Intervals") + 
+        ylab("No of Days Active")
+grid.arrange(plt, tbl, ncol = 2, as.table=TRUE)
+```
+
 
 
 ## Imputing missing values
 
+####1 - Calculate and report on total number of missing values in the raw dataset   
+
+```{r}
+sum(is.na(rawData$steps))
+```
+
+####2 - Devise a strategy for filling in all of the missing values in the dataset   
+
+Lets take the mean of the same interval across all weekdays or weekends as the value to replace an NA. So if a Sunday interval 0:05 is NA we substitute the mean of all steps for all other Sundays at 05:00   
+
+-- Get mean of steps for an interval for each weekday (7 days)
+
+```{r}
+# Create new variable called weekdays
+ActivityNoNA$weekdays <- weekdays(ActivityNoNA$date_time)
+
+# Ensure we can sort correctly 
+ActivityNoNA$weekdays <- factor(ActivityNoNA$weekdays, 
+        levels=c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+
+# Group by weekday and Interval
+by_wd <- group_by(ActivityNoNA, weekdays, interval)
+mean_days <- summarise(by_wd, mean_steps=mean(steps))
+
+# Sort by Weekday
+mean_days <- arrange(mean_days, weekdays)
+```
+
+we can plot that by day to have a look at mean steps
+
+```{r}
+xyplot(mean_steps ~ interval | weekdays, data=mean_days)
+
+```
+
+
+Id the rows with NA's and replace with appropriate mean
+
+```{r}
+# All rows with an NA in the variable steps
+badrows <- rawData[is.na(rawData$steps),]
+
+# Create character representation of the intervals in form HH:MM
+hrs <- paste(sprintf("%02d", badrows$interval%/%100), 
+             sprintf("%02d", badrows$interval%%100), sep=":") 
+
+# Create a new column for the data frame 
+date_time <- as.POSIXct(paste(badrows$date, hrs), "%Y-%m-%d %H:%M", tz="GMT")
+badrows$date_time <- date_time
+
+# Create new variable called weekdays
+badrows$weekdays <- weekdays(badrows$date_time)
+# Ensure we can sort correctly 
+badrows$weekdays <- factor(badrows$weekdays, 
+        levels=c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+
+#Loop through each row and substitute NA with mean calculated in mean_week
+## Create a function we will use to impute missing values
+## Paameters: badrows - dataframe containing the NA rows
+## Parameters: mean_days - dataframe containing mean steps by interval and weekday
+myimpute <- function(badrows, mean_days) {
+        for(i in 1:nrow(badrows)) {
+                wkday <- badrows[i, 5]
+                intval <- badrows[i, 3]
+                x <- filter(mean_days, (weekdays == wkday) & (interval == intval))
+                badrows[i, 1] <- as.integer(x[3])  #Make it integer
+        }    
+        return(badrows)
+}
+
+goodrows <- myimpute(badrows, mean_days)
+```
+
+***Note:*** we cater for the weekly cycle of activity when imputing but but not monthly cycle.   
+
+3 - Create a new dataset that is equal to the original dataset but with the missing data filled in.   
+
+```{r}
+#Lets reconstruct the dataframe with No NA's and this corrected one
+tmpDF <- subset(ActivityNoNA, select= -c(act_pos))
+goodData <- rbind(tmpDF, goodrows)
+
+```
+
+Lets just check the row totals from our rawData as we should now have the same totals 
+for rawData and goodData   
+
+```{r}
+str(rawData)
+str(goodData)
+
+```
+
+Lets check if we have any NA's in goodData
+
+```{r}
+summary(goodData)
+
+```
+
+
+4 - Make a histogram of the total number of steps taken each day and Calculate and report the mean and median total number of steps taken per day   
+
+```{r}
+by_gooddays <- group_by(goodData, date)
+stats_by_gooddays <- summarise(by_gooddays, 
+                          mean_steps = mean(steps), 
+                          total_steps = sum(steps),
+                          median_steps = median(steps))
+
+#Lets plot the histogram
+hst2 <- histogram(~ total_steps, data=stats_by_gooddays,
+                main = "Histogram of Total Number of Steps per Day - Imputed Data",
+                xlab = "Total Number of Steps per Day")
+hst2
+```
+
+Lets just compare the histograms from data with no NA's to the data that we imputed for NA's. We will use a ggplot with mashed together stats data
+
+```{r}
+# Going to create a master stats data frame
+stats_by_day$cat <- "Not imputed"
+stats_by_gooddays$cat <- "Imputed"
+master_stats <- rbind(stats_by_day, stats_by_gooddays)
+
+#Lets plot the imputed and non imputed data together 
+ggplot(master_stats, aes(total_steps, fill=cat)) + 
+        geom_bar(pos="dodge") +
+        ggtitle("Histogram of Total Steps per day") + 
+        xlab("Total Steps")
+
+```
+
+Lets report on mean and median steps taken per day
+
+```{r}
+print.data.frame(stats_by_day[,1:4])
+```
+
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+1 - To answer this question lets create a factor variable called **wtype**. This can have two possible values _Weekends_ or _Weekdays_   
+
+```{r}
+# Create a Weekday Type field so we can discriminate between Weekdays and Weekends
+ActivityNoNA$weekdays <- weekdays(ActivityNoNA$date_time)
+ActivityNoNA$wtype <- as.factor(ifelse(ActivityNoNA$weekdays %in% c("Saturday", "Sunday"), "Weekend", "Weekday"))
+by_wtype <- group_by(ActivityNoNA, interval, wtype)
+dfms <- summarise(by_wtype, mean_steps = mean(steps))
+summary(dfms)
+```
+
+2 - Panel Plot containing a time series plot of 5-minute interval and avg number of steps 
+
+```{r}
+# Plot the activity 
+ plt <- ggplot(dfms, aes(interval, mean_steps)) + 
+        geom_line() + 
+        facet_wrap(~wtype,ncol=1) + 
+        geom_vline(xintercept=c(600, 900, 1200, 1600, 1800, 2100), 
+                   color="green", show_guide=TRUE) + 
+        ggtitle("Average Steps per Interval by Weekday Type") + 
+        xlab("Interval") +
+        ylab("Average number of steps taken") +
+        annotate("text", label = "Lines shown at 06:00, 09:00, 12:00, 16:00, 18:00, 21:00",
+                 x=1000, y=240, size=3)
+
+plt
+```
+
+Based on the graphs above there is a clear difference in activity between weekday and weekend   
+1. The number of steps is higher at the busiest interval   
+2. The peaks are better defined during the weekday   
+3. There is a higher average of steps over the weekend. This is borne out if we look at the average number of steps for each of the categories   
+
+```{r}
+summarise(group_by(ActivityNoNA, wtype), mean_steps=mean(steps))
+```
+
+
+
+***End of Analysis***
+
+
+
+
