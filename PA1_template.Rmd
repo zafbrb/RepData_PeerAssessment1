@@ -358,7 +358,7 @@ ggplot(master_stats, aes(total_steps, fill=cat)) +
 Lets report on mean and median steps taken per day
 
 ```{r}
-print.data.frame(stats_by_day[,1:4])
+print.data.frame(stats_by_gooddays[,1:4])
 ```
 
 
@@ -369,9 +369,9 @@ print.data.frame(stats_by_day[,1:4])
 
 ```{r}
 # Create a Weekday Type field so we can discriminate between Weekdays and Weekends
-ActivityNoNA$weekdays <- weekdays(ActivityNoNA$date_time)
-ActivityNoNA$wtype <- as.factor(ifelse(ActivityNoNA$weekdays %in% c("Saturday", "Sunday"), "Weekend", "Weekday"))
-by_wtype <- group_by(ActivityNoNA, interval, wtype)
+goodData$weekdays <- weekdays(goodData$date_time)
+goodData$wtype <- as.factor(ifelse(goodData$weekdays %in% c("Saturday", "Sunday"), "Weekend", "Weekday"))
+by_wtype <- group_by(goodData, interval, wtype)
 dfms <- summarise(by_wtype, mean_steps = mean(steps))
 summary(dfms)
 ```
@@ -400,7 +400,7 @@ Based on the graphs above there is a clear difference in activity between weekda
 3. There is a higher average of steps over the weekend. This is borne out if we look at the average number of steps for each of the categories   
 
 ```{r}
-summarise(group_by(ActivityNoNA, wtype), mean_steps=mean(steps))
+summarise(group_by(goodData, wtype), mean_steps=mean(steps))
 ```
 
 
